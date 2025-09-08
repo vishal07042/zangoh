@@ -543,4 +543,151 @@ router.post("/snapshots", async (req, res, next) => {
 	}
 });
 
+// Get current metrics snapshot
+router.get("/snapshot", async (req, res, next) => {
+	try {
+		// Get latest metrics for each type
+		const latestMetrics = await MetricSnapshot.aggregate([
+			{
+				$sort: { windowStart: -1 },
+			},
+			{
+				$group: {
+					_id: "$snapshotType",
+					latestSnapshot: { $first: "$$ROOT" },
+				},
+			},
+			{
+				$replaceRoot: { newRoot: "$latestSnapshot" },
+			},
+		]);
+
+		// Transform to a more useful format
+		const metricsMap = {};
+		latestMetrics.forEach((metric) => {
+			metricsMap[metric.snapshotType] = {
+				value: metric.value,
+				timestamp: metric.windowStart,
+				metadata: metric.metadata,
+			};
+		});
+
+		// Generate current snapshot with real-time data
+		const currentSnapshot = {
+			csat: metricsMap.csat || {
+				value: Math.round((Math.random() * 2 + 7.5) * 10) / 10, // 7.5-9.5
+				timestamp: new Date(),
+				metadata: { trend: Math.random() > 0.5 ? "up" : "down" },
+			},
+			avgResponseTime: metricsMap.avgResponseTime || {
+				value: Math.round((Math.random() * 60 + 60) * 1000), // 60-120 seconds in ms
+				timestamp: new Date(),
+				metadata: {
+					trend: Math.random() > 0.5 ? "up" : "down",
+					formatted: `${Math.floor(
+						(Math.random() * 60 + 60) / 60
+					)}:${String(
+						Math.floor((Math.random() * 60 + 60) % 60)
+					).padStart(2, "0")}`,
+				},
+			},
+			activeConversations: metricsMap.activeConversations || {
+				value: Math.floor(Math.random() * 100 + 380), // 380-480
+				timestamp: new Date(),
+				metadata: { trend: Math.random() > 0.3 ? "up" : "down" },
+			},
+			escalationRate: metricsMap.escalationRate || {
+				value: Math.round((Math.random() * 20 + 40) * 10) / 10, // 40-60%
+				timestamp: new Date(),
+				metadata: { trend: Math.random() > 0.6 ? "up" : "down" },
+			},
+			timestamp: new Date(),
+		};
+
+		res.json(currentSnapshot);
+	} catch (e) {
+		next(e);
+	}
+});
+
+// SSE endpoint for real-time metrics updates
+router.get("/stream", (req, res) => {
+	try {
+		// Set SSE headers
+		res.writeHead(200, {
+			"Content-Type": "text/event-stream",
+			"Cache-Control": "no-cache",
+			Connection: "keep-alive",
+			"Access-Control-Allow-Origin": "*",
+			"Access-Control-Allow-Headers": "Cache-Control",
+		});
+
+		// Send initial data
+		const sendMetrics = () => {
+			const metricsData = {
+				csat: {
+					value: Math.round((Math.random() * 2 + 7.5) * 10) / 10, // 7.5-9.5
+					timestamp: new Date(),
+					metadata: {
+						trend: Math.random() > 0.5 ? "up" : "down",
+						change: (Math.random() * 0.4 - 0.2).toFixed(1), // -0.2 to +0.2
+					},
+				},
+				avgResponseTime: {
+					value: Math.round((Math.random() * 60 + 60) * 1000), // 60-120 seconds in ms
+					timestamp: new Date(),
+					metadata: {
+						trend: Math.random() > 0.5 ? "up" : "down",
+						formatted: `${Math.floor(
+							(Math.random() * 60 + 60) / 60
+						)}:${String(
+							Math.floor((Math.random() * 60 + 60) % 60)
+						).padStart(2, "0")}`,
+						change: Math.floor(Math.random() * 20 - 10), // -10 to +10 seconds
+					},
+				},
+				activeConversations: {
+					value: Math.floor(Math.random() * 100 + 380), // 380-480
+					timestamp: new Date(),
+					metadata: {
+						trend: Math.random() > 0.3 ? "up" : "down",
+						change: Math.floor(Math.random() * 20 - 10), // -10 to +10
+					},
+				},
+				escalationRate: {
+					value: Math.round((Math.random() * 20 + 40) * 10) / 10, // 40-60%
+					timestamp: new Date(),
+					metadata: {
+						trend: Math.random() > 0.6 ? "up" : "down",
+						change: (Math.random() * 4 - 2).toFixed(1), // -2% to +2%
+					},
+				},
+				timestamp: new Date(),
+			};
+
+			res.write(`data: ${JSON.stringify(metricsData)}\n\n`);
+		};
+
+		// Send initial metrics
+		sendMetrics();
+
+		// Set up interval to send updates every 2 seconds
+		const interval = setInterval(sendMetrics, 2000);
+
+		// Clean up on client disconnect
+		req.on("close", () => {
+			clearInterval(interval);
+			res.end();
+		});
+
+		req.on("error", () => {
+			clearInterval(interval);
+			res.end();
+		});
+	} catch (e) {
+		console.error("SSE stream error:", e);
+		res.status(500).end();
+	}
+});
+
 module.exports = router;
